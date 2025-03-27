@@ -1,49 +1,166 @@
-import os
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+# import os
+# import uuid
+# from dotenv import load_dotenv
+# from fastapi import FastAPI, HTTPException,Request,Depends
+# from fastapi.responses import JSONResponse
+# from models import get_db,ConversationHistory
+# from sqlalchemy.orm import Session
 
+# from langchain.chains import ConversationChain
+# from langchain.memory import ConversationBufferMemory
+# from langchain.chat_models import ChatOpenAI
+# from langchain.chat_models import AzureChatOpenAI
+
+# from pydantic import BaseModel
+
+
+# load_dotenv()
+
+# app = FastAPI()
+
+
+
+# memory = ConversationBufferMemory()
+
+# class ChatRequest(BaseModel):
+#     user_id: str
+#     memory: str
+#    # Initialize the conversational model (e.g., OpenAI GPT)
+# model_name = "gpt-4o" 
+
+# os.environ["AZURE_OPENAI_API_KEY"] = os.getenv("API_TOKEN")
+# os.environ["AZURE_OPENAI_ENDPOINT"] = os.getenv("AZURE_OPENAI_ENDPOINT")
+# os.environ["OPENAI_API_VERSION"] = "2023-05-15"  # Set the API version here
+
+
+# llm = AzureChatOpenAI(
+#     model=model_name,
+#     temperature=0.7
+# )
+#    # Create the conversational chain
+# conversation = ConversationChain(
+#        llm=llm,
+#        memory=memory
+# )
+
+# def save_memory(user_id, memory_data,session: Session = Depends(get_db)):
+
+#     conversation = session.query(ConversationHistory).filter_by(user_id=user_id).first()
+#     if conversation:
+#         conversation.memory = memory_data
+#     else:
+#         conversation = ConversationHistory(user_id=user_id, memory=memory_data)
+#         session.add(conversation)
+#     session.commit()
+
+# def load_memory(user_id,session: Session = Depends(get_db)):
+
+#     conversation = session.query(ConversationHistory).filter_by(user_id=user_id).first()
+
+#     return conversation.memory if conversation else None
+
+
+
+
+# @app.post("/chat")
+# async def chat_with_bot(user_id:str):
+#        # Load memory for the user
+#     previous_memory = load_memory(user_id)
+#     if previous_memory:
+#         memory.load_memory(previous_memory)
+
+#        # Process the user's message
+#     response = conversation.predict()
+
+#        # Save the updated memory
+#     save_memory(user_id, memory.buffer)
+
+#     return {"response": response}
+
+# @app.post("/new_chat")
+# async def new_chat(request: Request,session: Session = Depends(get_db)):
+#     user_id = uuid.uuid4()
+#     memory = ConversationBufferMemory()
+#     save_memory(str(user_id), memory.buffer,session)
+
+#     return {"user_id": str(user_id), "memory": memory.buffer}
+
+
+import os
 import uuid
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.responses import JSONResponse
+from models import get_db, ConversationHistory, SessionLocal
+from sqlalchemy.orm import Session
+
+from langchain.chains import ConversationChain
+from langchain.memory import ConversationBufferMemory
+from langchain.chat_models import AzureChatOpenAI
+
+from pydantic import BaseModel
 
 load_dotenv()
 
 app = FastAPI()
 
-sessions = {} 
+memory = ConversationBufferMemory()
 
-def generate_session_id():
-    
-    return str(uuid.uuid4())
+class ChatRequest(BaseModel):
+    user_id: str
+    message: str  # Changed 'memory' to 'message'
 
-@app.post("/chat/{session_id}")
-async def chat(session_id: str, message: str):
-    """Handles chat messages for a specific session."""
+# Initialize the conversational model (e.g., OpenAI GPT)
+model_name = "gpt-4o"
 
-    if session_id not in sessions:
-        # Create a new session if it doesn't exist
-        sessions[session_id] = {"history": [], "context": {}}
+os.environ["AZURE_OPENAI_API_KEY"] = os.getenv("API_TOKEN")
+os.environ["AZURE_OPENAI_ENDPOINT"] = os.getenv("AZURE_OPENAI_ENDPOINT")
+os.environ["OPENAI_API_VERSION"] = "2023-05-15"  # Set the API version here
 
-    session = sessions[session_id]
-    session["history"].append({"user": message})
+llm = AzureChatOpenAI(
+    model=model_name,
+    temperature=0.7
+)
+# Create the conversational chain
+conversation = ConversationChain(
+    llm=llm,
+    memory=memory
+)
 
-    # Simulate a chatbot response (replace with your actual chatbot logic)
-    bot_response = f"You said: {message}.  This is a response from the chatbot in session {session_id}."
-    session["history"].append({"bot": bot_response})
+def save_memory(user_id, memory_data, session: Session = Depends(get_db)):
+    conversation = session.query(ConversationHistory).filter_by(user_id=user_id).first()
+    if conversation:
+        conversation.memory = memory_data
+    else:
+        conversation = ConversationHistory(user_id=user_id, memory=memory_data)
+        session.add(conversation)
+    session.commit()
+    # session.close() # Removed this line
 
-    return JSONResponse({"session_id": session_id, "history": session["history"]})
-
+def load_memory(user_id, session: Session = Depends(get_db)):
+    conversation = session.query(ConversationHistory).filter_by(user_id=user_id).first()
+    # session.close() # Removed this line
+    return conversation.memory if conversation else None
 
 @app.post("/chat")
-async def create_chat():
-    """Creates a new chat session and returns the session ID."""
-    session_id = generate_session_id()
-    sessions[session_id] = {"history": [], "context": {}}
-    return JSONResponse({"session_id": session_id})
+async def chat_with_bot(request: ChatRequest, session: Session = Depends(get_db)):
+    # Load memory for the user
+    previous_memory = load_memory(request.user_id, session)
+    if previous_memory:
+        memory.chat_memory(previous_memory)
 
-@app.get("/chat/{session_id}")
-async def get_chat_history(session_id: str):
-    """Retrieves the chat history for a given session ID."""
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return JSONResponse({"session_id": session_id, "history": sessions[session_id]["history"]})
+    # Process the user's message
+    response = conversation.predict(input=request.message) # Changed invoke to predict
 
+    # Save the updated memory
+    save_memory(request.user_id, memory.buffer, session)
+
+    return {"response": response}
+
+@app.post("/new_chat")
+async def new_chat(request: Request, session: Session = Depends(get_db)):
+    user_id = uuid.uuid4()
+    memory = ConversationBufferMemory()
+    save_memory(str(user_id), memory.buffer, session)
+
+    return {"user_id": str(user_id), "memory": memory.buffer}

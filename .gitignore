@@ -3,3 +3,4 @@ env/
 langchain.ipynb
 Project-plan.docx
 data/
+memory.db
